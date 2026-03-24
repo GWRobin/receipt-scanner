@@ -307,7 +307,7 @@ def save_receipt(data: ReceiptCreate, db: Session = Depends(get_db), _: None = D
             pass
 
     receipt = Receipt(
-        user_name=data.user_name,
+        user_name=_normalize_name(data.user_name),
         store_name=data.store_name,
         amount_gross=to_decimal(data.amount_gross),
         amount_net=to_decimal(data.amount_net),
@@ -343,7 +343,7 @@ def list_receipts(db: Session = Depends(get_db), _: None = Depends(require_auth)
     return [
         {
             "id": r.id,
-            "user_name": r.user_name,
+            "user_name": _normalize_name(r.user_name),
             "store_name": r.store_name,
             "amount_gross": float(r.amount_gross) if r.amount_gross else None,
             "amount_net": float(r.amount_net) if r.amount_net else None,
@@ -377,7 +377,7 @@ def update_receipt(receipt_id: int, data: ReceiptUpdate, db: Session = Depends(g
     if not receipt:
         raise HTTPException(status_code=404, detail="Kvittot hittades inte.")
 
-    receipt.user_name = data.user_name
+    receipt.user_name = _normalize_name(data.user_name)
     receipt.store_name = data.store_name
     receipt.amount_gross = to_decimal(data.amount_gross)
     receipt.amount_net = to_decimal(data.amount_net)
@@ -427,7 +427,7 @@ def list_deleted_receipts(db: Session = Depends(get_db), _: None = Depends(requi
     return [
         {
             "id": r.id,
-            "user_name": r.user_name,
+            "user_name": _normalize_name(r.user_name),
             "store_name": r.store_name,
             "amount_gross": float(r.amount_gross) if r.amount_gross else None,
             "amount_net": float(r.amount_net) if r.amount_net else None,
@@ -561,6 +561,12 @@ def export_receipts_csv(
 # CSV-hjälpfunktioner                                                          #
 # --------------------------------------------------------------------------- #
 
+def _normalize_name(name: Optional[str]) -> Optional[str]:
+    """Normalisera ett personnamn: strip + title-case. 'robin' → 'Robin', 'ANNA' → 'Anna'."""
+    if not name or not name.strip():
+        return None
+    return name.strip().title()
+
 def _safe_float(val):
     """
     Parsar ett beloppsuttryck till float.
@@ -642,7 +648,7 @@ def _parse_csv_file(contents: bytes, delimiter: str | None = None):
             "moms":         r.get("moms", "").strip() or None,
             "moms_procent": r.get("moms_procent", "").strip() or None,
             "kommentar":    r.get("kommentar", "").strip() or None,
-            "användare":    (r.get("användare", "") or r.get("anvandare", "")).strip() or None,
+            "användare":    _normalize_name(r.get("användare", "") or r.get("anvandare", "") or None),
         })
     return rows
 
@@ -753,7 +759,7 @@ def import_receipts(data: ImportRequest, db: Session = Depends(get_db), _: None 
             vat_amount    = to_decimal(_safe_float(row.moms)),
             vat_rate      = to_decimal(_safe_float(row.moms_procent)),
             comment       = row.kommentar or None,
-            user_name     = getattr(row, 'användare', None) or None,
+            user_name     = _normalize_name(getattr(row, 'användare', None)),
         )
         db.add(receipt)
         imported += 1
