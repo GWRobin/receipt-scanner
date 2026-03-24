@@ -83,8 +83,9 @@ function CsvImportModal({ onClose, onImported }) {
       form.append('delimiter', delimiter)
       const res = await fetch('/api/receipts/check-duplicates', { method: 'POST', body: form })
       if (!res.ok) {
-        const e = await res.json()
-        throw new Error(e.detail || 'Kunde inte analysera filen')
+        let msg = 'Kunde inte analysera filen'
+        try { const e = await res.json(); msg = e.detail || msg } catch {}
+        throw new Error(msg)
       }
       const data = await res.json()
       const checkedInit = {}
@@ -123,8 +124,9 @@ function CsvImportModal({ onClose, onImported }) {
         body: JSON.stringify({ rows: selectedRows }),
       })
       if (!res.ok) {
-        const e = await res.json()
-        throw new Error(e.detail || 'Import misslyckades')
+        let msg = 'Import misslyckades'
+        try { const e = await res.json(); msg = e.detail || msg } catch {}
+        throw new Error(msg)
       }
       const data = await res.json()
       setResult(data)
@@ -186,10 +188,37 @@ function CsvImportModal({ onClose, onImported }) {
           {/* ── STEG 1: Välj fil ── */}
           {(step === 'pick' || step === 'checking') && (
             <>
-              <p style={m.hint}>
-                Välj en CSV-fil med kolumnerna:<br />
-                <code style={{ color: C.accent }}>datum, butik, brutto, netto, moms, moms_procent, kommentar, användare</code><br />
-                Endast <strong>datum</strong> och <strong>brutto</strong> är obligatoriska. Dubbletter identifieras automatiskt.
+              {/* Kolumnformat-tabell */}
+              <table style={{ ...m.table, marginBottom: 16 }}>
+                <thead>
+                  <tr>
+                    <th style={m.th}>Kolumn</th>
+                    <th style={m.th}>Krav</th>
+                    <th style={m.th}>Format / exempel</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['datum',        '✱ Obligatorisk', 'ÅÅÅÅ-MM-DD  →  2024-03-15'],
+                    ['brutto',       '✱ Obligatorisk', 'Belopp inkl. moms  →  6 000,00 kr  eller  249.90'],
+                    ['butik',        'Valfri',          'Butiksnamn som fritext  →  ICA Maxi'],
+                    ['netto',        'Valfri',          'Belopp exkl. moms, samma format som brutto'],
+                    ['moms',         'Valfri',          'Momsbelopp, samma format som brutto'],
+                    ['moms_procent', 'Valfri',          'Momssats i procent  →  25'],
+                    ['kommentar',    'Valfri',          'Fritext'],
+                    ['användare',    'Valfri',          'Personnamn  →  Anna'],
+                  ].map(([col, req, fmt]) => (
+                    <tr key={col}>
+                      <td style={m.td}><code style={{ color: C.accent, fontSize: 11 }}>{col}</code></td>
+                      <td style={{ ...m.td, whiteSpace: 'nowrap', color: req.startsWith('✱') ? '#fcd34d' : C.textMuted, fontSize: 11 }}>{req}</td>
+                      <td style={{ ...m.td, color: C.textMuted, fontSize: 11 }}>{fmt}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ ...m.hint, marginBottom: 12 }}>
+                Belopp accepteras med komma <em>eller</em> punkt som decimaltecken och mellanslag eller punkt som tusentalsavgränsare.
+                Valutasuffix som <code>kr</code> ignoreras automatiskt.
               </p>
 
               {/* Delimiter-väljare */}

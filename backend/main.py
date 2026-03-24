@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import re
 import base64
 import json
 import logging
@@ -11,7 +12,7 @@ from typing import Optional
 
 import anthropic
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Request, Query
+from fastapi import FastAPI, File, Form, UploadFile, Depends, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
@@ -524,10 +525,39 @@ def export_receipts_csv(
 # --------------------------------------------------------------------------- #
 
 def _safe_float(val):
-    if val is None or str(val).strip() == "":
+    """
+    Parsar ett beloppsuttryck till float.
+    Hanterar:
+      - Valutasuffix och prefix: "kr", "SEK", ":-", "€", "$" m.m.
+      - Svenska tusentalsavgränsare (mellanslag): "6 000,00"
+      - Punkt som tusentalsavgränsare: "6.000,00"
+      - Komma som decimaltecken: "6000,50"
+    """
+    if val is None:
         return None
+    s = str(val).strip()
+    if not s:
+        return None
+    # Ta bort allt som inte är siffra, mellanslag, komma, punkt eller minus
+    s = re.sub(r'[^\d\s.,\-]', '', s).strip()
+    if not s:
+        return None
+    # Avgör decimal- vs tusentalsavgränsare
+    if ',' in s and '.' in s:
+        if s.rfind(',') > s.rfind('.'):
+            # "6.000,00" → punkt = tusental, komma = decimal
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            # "6,000.00" → komma = tusental, punkt = decimal
+            s = s.replace(',', '')
+    elif ',' in s:
+        # Bara komma → decimal (svenska standard), ta bort mellanslag (tusental)
+        s = s.replace(' ', '').replace(',', '.')
+    else:
+        # Bara punkt eller enbart siffror → ta bort mellanslag
+        s = s.replace(' ', '')
     try:
-        return float(str(val).strip().replace(",", "."))
+        return float(s)
     except ValueError:
         return None
 
@@ -613,7 +643,7 @@ def _is_duplicate(row: dict, db: Session) -> Optional[int]:
 @app.post("/api/receipts/check-duplicates")
 async def check_duplicates(
     file: UploadFile = File(...),
-    delimiter: str = Form(default=None),
+    delimiter: Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
     _: None = Depends(require_auth),
 ):
