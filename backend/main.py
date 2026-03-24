@@ -166,6 +166,53 @@ def compress_image(image_bytes: bytes) -> tuple[bytes, int, int]:
     return compressed, orig_kb, comp_kb
 
 
+CLAUDE_MAX_BYTES = 4 * 1024 * 1024  # 4 MB med marginal mot Claudes 5 MB-gräns
+
+def prepare_for_ocr(image_bytes: bytes, content_type: str) -> tuple[bytes, str]:
+    """
+    Förbered bilden för Claude OCR med minimal kvalitetsförlust.
+    Strategi: behåll originalet om det ryms, annars sänk upplösningen
+    stegvis med hög JPEG-kvalitet. Sänk kvaliteten bara som sista utväg.
+    Returnerar (bytes, media_type).
+    """
+    # Steg 1: konvertera format om det behövs (Claude kräver jpeg/png/gif/webp)
+    supported = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+    ct = content_type.lower()
+    if ct in supported and len(image_bytes) <= CLAUDE_MAX_BYTES:
+        return image_bytes, ct  # originalet ryms — använd det direkt
+
+    # Öppna och konvertera till RGB JPEG
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    w, h = img.size
+
+    # Steg 2: prova progressivt lägre upplösning med hög kvalitet (90)
+    for max_px in (4000, 3000, 2400, 2000, 1600):
+        longest = max(w, h)
+        if longest > max_px:
+            scale = max_px / longest
+            resized = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        else:
+            resized = img
+        buf = io.BytesIO()
+        resized.save(buf, format="JPEG", quality=90, optimize=True)
+        candidate = buf.getvalue()
+        if len(candidate) <= CLAUDE_MAX_BYTES:
+            logger.info(f"OCR-komprimering: {len(image_bytes)//1024} KB → {len(candidate)//1024} KB (max_px={max_px})")
+            return candidate, "image/jpeg"
+
+    # Steg 3: sänk kvaliteten om upplösningsreduktion inte räcker
+    resized = img.resize((1600, int(h * 1600 / w)) if w > h else (int(w * 1600 / h), 1600), Image.LANCZOS)
+    for quality in (80, 65, 50):
+        buf = io.BytesIO()
+        resized.save(buf, format="JPEG", quality=quality, optimize=True)
+        candidate = buf.getvalue()
+        if len(candidate) <= CLAUDE_MAX_BYTES:
+            logger.info(f"OCR-komprimering (kvalitet={quality}): {len(image_bytes)//1024} KB → {len(candidate)//1024} KB")
+            return candidate, "image/jpeg"
+
+    return candidate, "image/jpeg"  # bästa möjliga vid denna punkt
+
+
 def run_claude_ocr(image_bytes: bytes, content_type: str) -> dict:
     """Skicka kvittobild till Claude och få tillbaka strukturerad data."""
     if not ANTHROPIC_API_KEY:
@@ -240,28 +287,20 @@ async def ocr_receipt(file: UploadFile = File(...), _: None = Depends(require_au
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"Bilden är för stor (max {MAX_UPLOAD_MB} MB).")
 
-    # Komprimera bilden: garantera att den håller sig under Claudes 5 MB-gräns
-    compressed, orig_kb, comp_kb = compress_image(contents)
+    # Förbered bilden för OCR: minimal komprimering, bara nog för att passa under Claudes gräns
+    ocr_bytes, ocr_ct = prepare_for_ocr(contents, file.content_type or "image/jpeg")
 
-    # Om bilden fortfarande är för stor, sänk kvaliteten progressivt
-    CLAUDE_MAX_BYTES = 4 * 1024 * 1024  # 4 MB med marginal
-    if len(compressed) > CLAUDE_MAX_BYTES:
-        img = Image.open(io.BytesIO(contents)).convert("RGB")
-        for quality in (60, 45, 30):
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=quality, optimize=True)
-            compressed = buf.getvalue()
-            if len(compressed) <= CLAUDE_MAX_BYTES:
-                break
-
-    # OCR: skicka komprimerad bild till Claude
+    # OCR: skicka bilden till Claude
     try:
-        result = run_claude_ocr(compressed, "image/jpeg")
+        result = run_claude_ocr(ocr_bytes, ocr_ct)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Claude OCR misslyckades: {e}")
         raise HTTPException(status_code=500, detail=f"OCR kunde inte köras: {str(e)}")
+
+    # Lagring: komprimera bilden separat för databasen
+    compressed, orig_kb, comp_kb = compress_image(contents)
     img_b64 = base64.b64encode(compressed).decode("utf-8")
 
     return {
