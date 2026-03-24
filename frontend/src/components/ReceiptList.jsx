@@ -395,11 +395,15 @@ function ExportPanel() {
 /* ══════════════════════════════════════════════════════════════════════════ */
 /* Huvudkomponent                                                             */
 /* ══════════════════════════════════════════════════════════════════════════ */
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
 export default function ReceiptList() {
   const [receipts,  setReceipts]  = useState([])
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
   const [selected,  setSelected]  = useState(null)   // öppnad modal
+  const [page,      setPage]      = useState(1)
+  const [pageSize,  setPageSize]  = useState(25)
 
   useEffect(() => {
     fetch('/api/receipts')
@@ -441,6 +445,12 @@ export default function ReceiptList() {
     const db = b.receipt_date || b.created_at || ''
     return db.localeCompare(da)
   })
+
+  /* ── Paginering ── */
+  const totalPages  = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const safePage    = Math.min(page, totalPages)
+  const pageStart   = (safePage - 1) * pageSize
+  const paginated   = sorted.slice(pageStart, pageStart + pageSize)
 
   /* ── Totaler ── */
   const perUser = {}
@@ -535,12 +545,33 @@ export default function ReceiptList() {
 
         <div style={s.divider} />
 
-        {/* Lista */}
-        <div style={s.sectionLabel}>Alla utlägg · klicka för detaljer</div>
+        {/* Lista – rubrik + sidväljare */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+          <span style={s.sectionLabel} >
+            Alla utlägg · klicka för detaljer
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: C.textMuted }}>Visa</span>
+            {PAGE_SIZE_OPTIONS.map(n => (
+              <button
+                key={n}
+                onClick={() => { setPageSize(n); setPage(1) }}
+                style={{
+                  padding: '3px 9px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                  border: `1px solid ${pageSize === n ? C.accent : C.border}`,
+                  background: pageSize === n ? 'rgba(59,130,246,0.15)' : C.surfaceDeep,
+                  color: pageSize === n ? C.accent : C.textMuted,
+                  fontWeight: pageSize === n ? 700 : 400,
+                }}
+              >{n}</button>
+            ))}
+            <span style={{ fontSize: 12, color: C.textMuted }}>per sida</span>
+          </div>
+        </div>
 
         {sorted.length === 0 ? (
           <div style={s.noData}>Inga kvitton sparade ännu.</div>
-        ) : sorted.map(r => {
+        ) : paginated.map(r => {
           const user  = r.user_name || 'Okänd'
           const color = userColor[user] || C.textMuted
           const net   = r.amount_net ?? r.amount_gross
@@ -573,6 +604,26 @@ export default function ReceiptList() {
             </div>
           )
         })}
+
+        {/* Sidnavigation */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}` }}>
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              style={{ padding: '6px 14px', borderRadius: 7, fontSize: 13, cursor: safePage === 1 ? 'default' : 'pointer', border: `1px solid ${C.border}`, background: C.surfaceDeep, color: safePage === 1 ? C.textDim : C.textMuted }}
+            >← Föregående</button>
+            <span style={{ fontSize: 13, color: C.textMuted, minWidth: 120, textAlign: 'center' }}>
+              Sida {safePage} av {totalPages}
+              <span style={{ color: C.textDim, marginLeft: 6 }}>({sorted.length} st)</span>
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              style={{ padding: '6px 14px', borderRadius: 7, fontSize: 13, cursor: safePage === totalPages ? 'default' : 'pointer', border: `1px solid ${C.border}`, background: C.surfaceDeep, color: safePage === totalPages ? C.textDim : C.textMuted }}
+            >Nästa →</button>
+          </div>
+        )}
 
         {/* Totalsumma per användare */}
         {Object.keys(perUser).length > 0 && (
