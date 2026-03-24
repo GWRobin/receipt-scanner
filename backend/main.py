@@ -240,17 +240,28 @@ async def ocr_receipt(file: UploadFile = File(...), _: None = Depends(require_au
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"Bilden är för stor (max {MAX_UPLOAD_MB} MB).")
 
-    # OCR: skicka originalet till Claude för bästa träffsäkerhet
+    # Komprimera bilden: garantera att den håller sig under Claudes 5 MB-gräns
+    compressed, orig_kb, comp_kb = compress_image(contents)
+
+    # Om bilden fortfarande är för stor, sänk kvaliteten progressivt
+    CLAUDE_MAX_BYTES = 4 * 1024 * 1024  # 4 MB med marginal
+    if len(compressed) > CLAUDE_MAX_BYTES:
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
+        for quality in (60, 45, 30):
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            compressed = buf.getvalue()
+            if len(compressed) <= CLAUDE_MAX_BYTES:
+                break
+
+    # OCR: skicka komprimerad bild till Claude
     try:
-        result = run_claude_ocr(contents, file.content_type)
+        result = run_claude_ocr(compressed, "image/jpeg")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Claude OCR misslyckades: {e}")
         raise HTTPException(status_code=500, detail=f"OCR kunde inte köras: {str(e)}")
-
-    # Lagring: komprimera bilden innan den skickas tillbaka till frontend
-    compressed, orig_kb, comp_kb = compress_image(contents)
     img_b64 = base64.b64encode(compressed).decode("utf-8")
 
     return {
