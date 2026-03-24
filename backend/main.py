@@ -541,14 +541,21 @@ def _safe_date(val):
             continue
     return None
 
-def _parse_csv_file(contents: bytes):
+def _parse_csv_file(contents: bytes, delimiter: str | None = None):
     """Läs CSV-bytes → lista av normaliserade rad-dict. Kastar ValueError vid fel."""
     try:
         text = contents.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = contents.decode("latin-1")
 
-    reader = csv.DictReader(io.StringIO(text))
+    if not delimiter:
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
+            delimiter = dialect.delimiter
+        except csv.Error:
+            delimiter = ","
+
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     if reader.fieldnames is None:
         raise ValueError("Filen verkar vara tom.")
 
@@ -604,7 +611,12 @@ def _is_duplicate(row: dict, db: Session) -> Optional[int]:
 # --------------------------------------------------------------------------- #
 
 @app.post("/api/receipts/check-duplicates")
-async def check_duplicates(file: UploadFile = File(...), db: Session = Depends(get_db), _: None = Depends(require_auth)):
+async def check_duplicates(
+    file: UploadFile = File(...),
+    delimiter: str = Form(default=None),
+    db: Session = Depends(get_db),
+    _: None = Depends(require_auth),
+):
     """
     Ta emot en CSV-fil, parsa den och returnera varje rad med flaggan
     is_duplicate + duplicate_id om en matchande post redan finns.
@@ -612,11 +624,16 @@ async def check_duplicates(file: UploadFile = File(...), db: Session = Depends(g
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Filen måste vara en .csv-fil.")
 
+    # Normalisera delimiter-värdet
+    delim = delimiter.strip() if delimiter and delimiter.strip() not in ("", "auto") else None
+    if delim == "\\t":
+        delim = "\t"
+
     contents = await file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"Filen är för stor (max {MAX_UPLOAD_MB} MB).")
     try:
-        rows = _parse_csv_file(contents)
+        rows = _parse_csv_file(contents, delimiter=delim)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

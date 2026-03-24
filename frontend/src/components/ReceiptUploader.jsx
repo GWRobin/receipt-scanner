@@ -55,12 +55,13 @@ function CsvImportModal({ onClose, onImported }) {
   const csvRef = useRef()
 
   // Steg: 'pick' → 'checking' → 'review' → 'importing' → 'done'
-  const [step,     setStep]     = useState('pick')
-  const [csvFile,  setCsvFile]  = useState(null)
-  const [rows,     setRows]     = useState([])    // [{...rowData, is_duplicate, duplicate_id, _row_index}]
-  const [checked,  setChecked]  = useState({})    // { _row_index: bool }
-  const [error,    setError]    = useState(null)
-  const [result,   setResult]   = useState(null)  // { imported, errors }
+  const [step,      setStep]     = useState('pick')
+  const [csvFile,   setCsvFile]  = useState(null)
+  const [delimiter, setDelimiter] = useState('auto')
+  const [rows,      setRows]     = useState([])    // [{...rowData, is_duplicate, duplicate_id, _row_index}]
+  const [checked,   setChecked]  = useState({})    // { _row_index: bool }
+  const [error,     setError]    = useState(null)
+  const [result,    setResult]   = useState(null)  // { imported, errors }
 
   /* Stäng på Escape */
   useEffect(() => {
@@ -79,6 +80,7 @@ function CsvImportModal({ onClose, onImported }) {
     try {
       const form = new FormData()
       form.append('file', f)
+      form.append('delimiter', delimiter)
       const res = await fetch('/api/receipts/check-duplicates', { method: 'POST', body: form })
       if (!res.ok) {
         const e = await res.json()
@@ -189,6 +191,36 @@ function CsvImportModal({ onClose, onImported }) {
                 <code style={{ color: C.accent }}>datum, butik, brutto, netto, moms, moms_procent, kommentar, användare</code><br />
                 Endast <strong>datum</strong> och <strong>brutto</strong> är obligatoriska. Dubbletter identifieras automatiskt.
               </p>
+
+              {/* Delimiter-väljare */}
+              <div style={{ marginBottom: 16 }}>
+                <span style={m.sectionLbl}>Separator</span>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { value: 'auto', label: 'Auto' },
+                    { value: ',',    label: 'Komma  ,' },
+                    { value: ';',    label: 'Semikolon  ;' },
+                    { value: '\\t',  label: 'Tab' },
+                    { value: '|',    label: 'Pipe  |' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setDelimiter(opt.value)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 7, fontSize: 13, cursor: 'pointer',
+                        border: `1px solid ${delimiter === opt.value ? C.accent : C.border}`,
+                        background: delimiter === opt.value ? 'rgba(59,130,246,0.15)' : C.surfaceDeep,
+                        color: delimiter === opt.value ? C.accent : C.textMuted,
+                        fontWeight: delimiter === opt.value ? 700 : 400,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div style={m.dropzone} onClick={() => step === 'pick' && csvRef.current.click()}>
                 {step === 'checking'
                   ? <span style={{ color: C.textMuted }}>⏳ Analyserar dubbletter…</span>
