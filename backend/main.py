@@ -420,6 +420,43 @@ def soft_delete_receipt(receipt_id: int, db: Session = Depends(get_db), _: None 
     return {"id": receipt_id, "deleted": True}
 
 
+@app.get("/api/receipts/deleted")
+def list_deleted_receipts(db: Session = Depends(get_db), _: None = Depends(require_auth)):
+    """Hämta alla soft-deletade kvitton."""
+    rows = db.query(Receipt).filter(Receipt.is_deleted == True).order_by(Receipt.created_at.desc()).all()
+    return [
+        {
+            "id": r.id,
+            "user_name": r.user_name,
+            "store_name": r.store_name,
+            "amount_gross": float(r.amount_gross) if r.amount_gross else None,
+            "amount_net": float(r.amount_net) if r.amount_net else None,
+            "vat_amount": float(r.vat_amount) if r.vat_amount else None,
+            "vat_rate": float(r.vat_rate) if r.vat_rate else None,
+            "receipt_date": r.receipt_date.isoformat() if r.receipt_date else None,
+            "comment": r.comment,
+            "image_filename": r.image_filename,
+            "has_image": r.image_data is not None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@app.post("/api/receipts/{receipt_id}/restore", status_code=200)
+def restore_receipt(receipt_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
+    """Återskapa ett soft-deletat kvitto."""
+    receipt = db.query(Receipt).filter(Receipt.id == receipt_id).first()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Kvittot hittades inte.")
+    if not receipt.is_deleted:
+        raise HTTPException(status_code=400, detail="Kvittot är inte borttaget.")
+    receipt.is_deleted = False
+    db.commit()
+    return {"id": receipt_id, "restored": True}
+
+
+
 @app.get("/api/receipts/{receipt_id}/image")
 def get_receipt_image(receipt_id: int, db: Session = Depends(get_db), _: None = Depends(require_auth)):
     """Hämta bilddata för ett specifikt kvitto."""

@@ -24,7 +24,9 @@ const inputBase = {
 /* ─── Hjälpfunktioner ─────────────────────────────────────────────────────── */
 const shortDate = (iso) => iso ? new Date(iso).toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' }) : ''
 const fullDate  = (iso) => iso ? new Date(iso).toLocaleDateString('sv-SE') : '—'
-const fmtKr     = (v)   => v != null ? `${Number(v).toFixed(2)} kr` : null
+const fmtKr     = (v)   => v != null
+  ? Number(v).toLocaleString('sv-SE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' kr'
+  : null
 const lastNDays = (n) => Array.from({ length: n }, (_, i) => {
   const d = new Date(); d.setDate(d.getDate() - (n - 1 - i))
   return d.toISOString().slice(0, 10)
@@ -67,11 +69,12 @@ function MVal({ v, fallback = '—' }) {
 /* ══════════════════════════════════════════════════════════════════════════ */
 /* Detaljmodal                                                                */
 /* ══════════════════════════════════════════════════════════════════════════ */
-function ReceiptModal({ receipt, userColor, onClose, onUpdated, onDeleted }) {
+function ReceiptModal({ receipt, userColor, onClose, onUpdated, onDeleted, onRestored, isDeleted = false }) {
   const [editing,     setEditing]     = useState(false)
   const [confirmDel,  setConfirmDel]  = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [deleting,    setDeleting]    = useState(false)
+  const [restoring,   setRestoring]   = useState(false)
   const [error,       setError]       = useState(null)
 
   /* Redigerbara fält */
@@ -123,9 +126,18 @@ function ReceiptModal({ receipt, userColor, onClose, onUpdated, onDeleted }) {
     try {
       const res = await fetch(`/api/receipts/${receipt.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Kunde inte radera')
-      onDeleted(receipt.id)
+      onDeleted(receipt.id, receipt)
       onClose()
     } catch (e) { setError(e.message); setDeleting(false); setConfirmDel(false) }
+  }
+
+  const handleRestore = async () => {
+    setRestoring(true); setError(null)
+    try {
+      const res = await fetch(`/api/receipts/${receipt.id}/restore`, { method: 'POST' })
+      if (!res.ok) throw new Error('Kunde inte återskapa kvittot')
+      onRestored(receipt.id)
+    } catch (e) { setError(e.message); setRestoring(false) }
   }
 
   const user = receipt.user_name || 'Okänd'
@@ -292,7 +304,14 @@ function ReceiptModal({ receipt, userColor, onClose, onUpdated, onDeleted }) {
 
         {/* Footer */}
         <div style={m.footer}>
-          {editing ? (
+          {isDeleted ? (
+            <>
+              <button style={m.btnSecondary} onClick={onClose}>Stäng</button>
+              <button style={{ ...m.btnPrimary, background: '#34d399' }} onClick={handleRestore} disabled={restoring}>
+                {restoring ? '⏳ Återskapar...' : '↩️ Återskapa kvitto'}
+              </button>
+            </>
+          ) : editing ? (
             <>
               <button style={m.btnSecondary} onClick={() => { setEditing(false); setError(null) }}>Avbryt</button>
               <button style={m.btnPrimary} onClick={handleSave} disabled={saving}>
@@ -301,7 +320,7 @@ function ReceiptModal({ receipt, userColor, onClose, onUpdated, onDeleted }) {
             </>
           ) : confirmDel ? (
             <div style={m.confirmRow}>
-              <span style={m.confirmText}>Radera detta kvitto permanent?</span>
+              <span style={m.confirmText}>Flytta till papperskorgen?</span>
               <button style={m.btnSecondary} onClick={() => setConfirmDel(false)}>Nej</button>
               <button style={m.btnDanger} onClick={handleDelete} disabled={deleting}>
                 {deleting ? '...' : 'Ja, radera'}
@@ -398,28 +417,43 @@ function ExportPanel() {
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
 
 export default function ReceiptList() {
-  const [receipts,  setReceipts]  = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState(null)
-  const [selected,  setSelected]  = useState(null)   // öppnad modal
-  const [page,      setPage]      = useState(1)
-  const [pageSize,  setPageSize]  = useState(25)
+  const [receipts,        setReceipts]        = useState([])
+  const [deletedReceipts, setDeletedReceipts] = useState([])
+  const [loading,         setLoading]         = useState(true)
+  const [error,           setError]           = useState(null)
+  const [selected,        setSelected]        = useState(null)
+  const [showDeleted,     setShowDeleted]     = useState(false)
+  const [page,            setPage]            = useState(1)
+  const [pageSize,        setPageSize]        = useState(25)
 
-  useEffect(() => {
-    fetch('/api/receipts')
-      .then(r => r.ok ? r.json() : Promise.reject('Kunde inte hämta kvitton'))
-      .then(d => { setReceipts(d); setLoading(false) })
+  const fetchAll = useCallback(() => {
+    setLoading(true)
+    Promise.all([
+      fetch('/api/receipts').then(r => r.ok ? r.json() : Promise.reject('Kunde inte hämta kvitton')),
+      fetch('/api/receipts/deleted').then(r => r.ok ? r.json() : Promise.reject('Kunde inte hämta raderade kvitton')),
+    ])
+      .then(([active, deleted]) => { setReceipts(active); setDeletedReceipts(deleted); setLoading(false) })
       .catch(e => { setError(String(e)); setLoading(false) })
   }, [])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   const handleUpdated = useCallback((updated) => {
     setReceipts(prev => prev.map(r => r.id === updated.id ? { ...r, ...updated } : r))
     setSelected(prev => prev ? { ...prev, ...updated } : prev)
   }, [])
 
-  const handleDeleted = useCallback((id) => {
+  const handleDeleted = useCallback((id, receiptData) => {
     setReceipts(prev => prev.filter(r => r.id !== id))
+    if (receiptData) setDeletedReceipts(prev => [receiptData, ...prev])
   }, [])
+
+  const handleRestored = useCallback((id) => {
+    const r = deletedReceipts.find(x => x.id === id)
+    setDeletedReceipts(prev => prev.filter(x => x.id !== id))
+    if (r) setReceipts(prev => [r, ...prev])
+    setSelected(null)
+  }, [deletedReceipts])
 
   /* ── Diagram ── */
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 29)
@@ -510,6 +544,8 @@ export default function ReceiptList() {
           onClose={() => setSelected(null)}
           onUpdated={handleUpdated}
           onDeleted={handleDeleted}
+          onRestored={handleRestored}
+          isDeleted={selected._isDeleted}
         />
       )}
 
@@ -545,12 +581,37 @@ export default function ReceiptList() {
 
         <div style={s.divider} />
 
+        {/* Totalsumma per användare – direkt under grafen */}
+        {Object.keys(perUser).length > 0 && (
+          <>
+            <div style={s.sectionLabel}>Totalt per användare</div>
+            {Object.entries(perUser)
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([user, { total, count }]) => (
+                <div key={user} style={s.totalRow}>
+                  <div style={s.totalUser}>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: userColor[user] || C.textMuted, marginRight: 8 }} />
+                    {user}
+                    <span style={s.totalCount}>({count} kvitto{count !== 1 ? 'n' : ''})</span>
+                  </div>
+                  <div style={s.totalAmount}>{fmtKr(total)}</div>
+                </div>
+              ))}
+            <div style={s.grandTotal}>
+              <div style={s.grandLabel}>Totalt alla</div>
+              <div style={s.grandAmount}>{fmtKr(grandTotal)}</div>
+            </div>
+          </>
+        )}
+
+        <div style={{ ...s.divider, marginTop: 8 }} />
+
         {/* Lista – rubrik + sidväljare */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-          <span style={s.sectionLabel} >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ ...s.sectionLabel, marginBottom: 0 }}>
             Alla utlägg · klicka för detaljer
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <span style={{ fontSize: 12, color: C.textMuted }}>Visa</span>
             {PAGE_SIZE_OPTIONS.map(n => (
               <button
@@ -562,10 +623,11 @@ export default function ReceiptList() {
                   background: pageSize === n ? 'rgba(59,130,246,0.15)' : C.surfaceDeep,
                   color: pageSize === n ? C.accent : C.textMuted,
                   fontWeight: pageSize === n ? 700 : 400,
+                  lineHeight: '1.4',
                 }}
               >{n}</button>
             ))}
-            <span style={{ fontSize: 12, color: C.textMuted }}>per sida</span>
+            <span style={{ fontSize: 12, color: C.textMuted }}>/ sida</span>
           </div>
         </div>
 
@@ -625,27 +687,47 @@ export default function ReceiptList() {
           </div>
         )}
 
-        {/* Totalsumma per användare */}
-        {Object.keys(perUser).length > 0 && (
+        {/* Raderade kvitton */}
+        {deletedReceipts.length > 0 && (
           <>
-            <div style={{ ...s.divider, marginTop: 16 }} />
-            <div style={s.sectionLabel}>Totalt per användare</div>
-            {Object.entries(perUser)
-              .sort((a, b) => b[1].total - a[1].total)
-              .map(([user, { total, count }]) => (
-                <div key={user} style={s.totalRow}>
-                  <div style={s.totalUser}>
-                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: userColor[user] || C.textMuted, marginRight: 8 }} />
-                    {user}
-                    <span style={s.totalCount}>({count} kvitto{count !== 1 ? 'n' : ''})</span>
+            <div style={{ ...s.divider, marginTop: 20 }} />
+            <button
+              onClick={() => setShowDeleted(v => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: showDeleted ? 12 : 0 }}
+            >
+              <span style={{ ...s.sectionLabel, marginBottom: 0, color: C.red }}>
+                🗑 Raderade kvitton ({deletedReceipts.length})
+              </span>
+              <span style={{ fontSize: 12, color: C.textMuted }}>{showDeleted ? '▲ Dölj' : '▼ Visa'}</span>
+            </button>
+
+            {showDeleted && deletedReceipts.map(r => {
+              const user  = r.user_name || 'Okänd'
+              const net   = r.amount_net ?? r.amount_gross
+              return (
+                <div
+                  key={r.id}
+                  style={{ ...s.listItem, opacity: 0.55 }}
+                  onClick={() => setSelected({ ...r, _isDeleted: true })}
+                  onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
+                  onMouseLeave={e => e.currentTarget.style.opacity = '0.55'}
+                >
+                  <div style={s.itemLeft}>
+                    <div style={s.itemRow1}>
+                      <span style={{ ...s.itemStore, textDecoration: 'line-through' }}>{r.store_name || '(okänd butik)'}</span>
+                    </div>
+                    <div style={s.itemRow2}>
+                      <span style={s.itemUser}>{user}</span>
+                      {r.receipt_date && <span style={s.itemDate}>{fullDate(r.receipt_date)}</span>}
+                      {r.comment && <span style={{ fontSize: 11, color: C.textDim, fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>"{r.comment}"</span>}
+                    </div>
                   </div>
-                  <div style={s.totalAmount}>{total.toFixed(2)} kr</div>
+                  <div style={s.itemRight}>
+                    <div style={{ ...s.itemAmount, textDecoration: 'line-through', color: C.textMuted }}>{net != null ? fmtKr(net) : '—'}</div>
+                  </div>
                 </div>
-              ))}
-            <div style={s.grandTotal}>
-              <div style={s.grandLabel}>Totalt alla</div>
-              <div style={s.grandAmount}>{grandTotal.toFixed(2)} kr</div>
-            </div>
+              )
+            })}
           </>
         )}
       </div>
