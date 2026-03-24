@@ -21,36 +21,29 @@ services:
       retries: 10
 
   backend:
-    build: ./backend
+    image: ${GHCR_IMAGE}-backend:latest
     container_name: receipt_backend
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-receipt_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-receipts_db}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      ENABLE_AUTH: ${ENABLE_AUTH:-false}    # Sätt till "true" för Authelia ForwardAuth
-      IMAGE_MAX_PX: ${IMAGE_MAX_PX:-1600}  # Max pixlar på längsta sida (default 1600)
-      IMAGE_QUALITY: ${IMAGE_QUALITY:-72}  # JPEG-kvalitet 1–95 (default 72)
+      ENABLE_AUTH: ${ENABLE_AUTH:-false}
+      IMAGE_MAX_PX: ${IMAGE_MAX_PX:-1600}
+      IMAGE_QUALITY: ${IMAGE_QUALITY:-72}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
 
   frontend:
-    image: node:20-alpine
+    image: ${GHCR_IMAGE}-frontend:latest
     container_name: receipt_frontend
     restart: unless-stopped
-    working_dir: /app
-    command: sh -c "npm install && npm run dev"
     ports:
       - "5173:5173"
     depends_on:
       - backend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
 
 volumes:
   postgres_data:
