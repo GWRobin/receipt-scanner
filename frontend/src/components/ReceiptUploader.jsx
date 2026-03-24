@@ -395,10 +395,13 @@ function MField({ label, children }) {
 /* ══════════════════════════════════════════════════════════════════════════ */
 /* Manuell registreringsmodal                                                 */
 /* ══════════════════════════════════════════════════════════════════════════ */
-function ManualReceiptModal({ onClose, onSaved }) {
+function ManualReceiptModal({ onClose, onSaved, authName = null }) {
   const imgRef = useRef()
 
-  const [userName,    setUserName]    = useState(() => { try { return localStorage.getItem('receipt_user_name') ?? '' } catch { return '' } })
+  const [userName,    setUserName]    = useState(() => {
+    if (authName) return authName
+    try { return localStorage.getItem('receipt_user_name') ?? '' } catch { return '' }
+  })
   const [storeName,   setStoreName]   = useState('')
   const [receiptDate, setReceiptDate] = useState('')
   const [amountGross, setAmountGross] = useState('')
@@ -521,7 +524,7 @@ function ManualReceiptModal({ onClose, onSaved }) {
           {/* Inlämnad av */}
           <span style={m.sectionLbl}>Inlämnad av</span>
           <div style={m.grid2}>
-            <MField label="Namn">
+            <MField label={authName ? 'Namn (förifyllt från inloggning)' : 'Namn'}>
               <input style={mInputBase} type="text" value={userName}
                 onChange={e => setUserName(e.target.value)} placeholder="Ditt namn" />
             </MField>
@@ -586,7 +589,7 @@ function ManualReceiptModal({ onClose, onSaved }) {
 /* ══════════════════════════════════════════════════════════════════════════ */
 /* Huvud-uploader                                                             */
 /* ══════════════════════════════════════════════════════════════════════════ */
-export default function ReceiptUploader({ onOcrDone, onImported }) {
+export default function ReceiptUploader({ onOcrDone, onImported, authName = null }) {
   const [file,        setFile]        = useState(null)
   const [preview,     setPreview]     = useState(null)
   const [loading,     setLoading]     = useState(false)
@@ -630,6 +633,7 @@ export default function ReceiptUploader({ onOcrDone, onImported }) {
       <ManualReceiptModal
         onClose={() => setShowManual(false)}
         onSaved={() => { setShowManual(false); if (onImported) onImported() }}
+        authName={authName}
       />
     )}
     <div style={s.card}>

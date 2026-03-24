@@ -267,14 +267,13 @@ export default function ReceiptForm({ ocrResult, onSaved, onBack, authName = nul
       <div style={s.section}>
         <div style={s.sectionTitle}>Inlämnad av</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label={authName ? 'Inloggad som' : 'Ditt namn'} found={!!userName}>
+          <Field label={authName ? 'Namn (förifyllt från inloggning)' : 'Ditt namn'} found={!!userName}>
             <input
-              style={{ ...inputBase, ...(authName ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+              style={inputBase}
               type="text"
               placeholder="Fyll i ditt namn..."
               value={userName}
-              onChange={e => { if (!authName) setUserName(e.target.value) }}
-              readOnly={!!authName}
+              onChange={e => setUserName(e.target.value)}
             />
           </Field>
           <Field label="Kommentar (valfritt)" found={false}>

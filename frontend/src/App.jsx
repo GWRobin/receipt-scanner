@@ -77,7 +77,7 @@ export default function App() {
           ))}
         </div>
 
-        {tab === 'scan'    && <ReceiptUploader onOcrDone={handleOcrDone} onImported={() => { setRefreshKey(k => k + 1); setTab('history') }} />}
+        {tab === 'scan'    && <ReceiptUploader onOcrDone={handleOcrDone} onImported={() => { setRefreshKey(k => k + 1); setTab('history') }} authName={authName} />}
         {tab === 'review'  && <ReceiptForm ocrResult={ocrResult} onSaved={handleSaved} onBack={() => setTab('scan')} authName={authName} />}
         {tab === 'history' && <ReceiptList key={refreshKey} />}
       </div>
